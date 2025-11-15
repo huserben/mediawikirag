@@ -7,8 +7,10 @@ readme = "README.md"
 requires-python = ">=3.8"
 
 [tool.uv]
-# uv-specific configuration can go here
+
+[tool.uv.extra-build-dependencies]
+mediawikirag = ["uv.build"]
 
 [build-system]
-requires = ["uv"]
+requires = ["uv", "uv.build"]
 build-backend = "uv.build"

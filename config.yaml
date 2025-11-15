@@ -1,0 +1,30 @@
+wiki:
+  url: "https://simpsons.fandom.com/de"
+  api_endpoint: "/api.php"
+
+storage:
+  network_drive: "D:/repos/mediawikirag/network_drive"
+  local_cache: "D:/repos/mediawikirag/cache"
+
+models:
+  embedding: "paraphrase-multilingual-MiniLM-L12-v2"
+  embedding_dim: 384
+
+chunking:
+  target_size: 800
+  overlap: 150
+  min_size: 200
+  max_size: 1500
+
+retrieval:
+  top_k: 5
+  similarity_threshold: 0.3
+
+update:
+  lock_timeout: 7200
+  archive_keep: 5
+  batch_size: 50
+
+logging:
+  level: "INFO"
+  file: "logs/updates.log"
