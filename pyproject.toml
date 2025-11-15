@@ -1,3 +1,5 @@
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
 [project]
 name = "mediawikirag"
 version = "0.1.0"
