@@ -30,6 +30,7 @@ import datetime
 
 logging.basicConfig(filename='update_index.log', level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 
+
 def main():
     parser = argparse.ArgumentParser(description="Update MediaWiki RAG index.")
     parser.add_argument('--full-rebuild', action='store_true', help='Force full index rebuild')
@@ -117,6 +118,19 @@ def main():
             storage.save_embeddings(embeddings, staging_path / 'embeddings.npy')
             with open(staging_path / 'wiki_state.json', 'w', encoding='utf-8') as f:
                 json.dump(new_state, f, ensure_ascii=False, indent=2)
+            # Write metadata.json for versioning and stats
+            metadata = {
+                'version': datetime.datetime.now().strftime('%Y-%m-%dT%H:%M:%S'),
+                'wiki_url': config['wiki'].get('url'),
+                'total_pages': len(pages),
+                'total_chunks': len(all_chunks),
+                'model_name': config['models'].get('embedding'),
+                'embedding_dim': int(embeddings.shape[1]) if hasattr(embeddings, 'shape') and len(embeddings.shape) > 1 else None,
+                'chunk_size': chunk_size,
+                'chunk_overlap': overlap
+            }
+            with open(staging_path / 'metadata.json', 'w', encoding='utf-8') as mf:
+                json.dump(metadata, mf, ensure_ascii=False, indent=2)
             logging.info('Saved chunks, embeddings, and wiki_state to staging.')
         except Exception as write_err:
             logging.error(f'Write error: {write_err}')
@@ -191,3 +205,7 @@ def main():
             storage.release_lock(lock_path)
         except Exception:
             pass
+
+
+if __name__ == '__main__':
+    main()

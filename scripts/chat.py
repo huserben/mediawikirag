@@ -7,21 +7,13 @@ from pathlib import Path
 import shutil
 import json
 
+import textwrap
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
 from config import load_config
 from storage import Storage
 from embedder import Embedder
 from cli import print_help
 
-# Optional rich formatting
-try:
-    from rich.console import Console
-    from rich.progress import Progress
-    from rich.table import Table
-    console = Console()
-    USE_RICH = True
-except ImportError:
-    USE_RICH = False
 
 logging.basicConfig(
     filename='chat.log',
@@ -51,47 +43,26 @@ def sync_local_cache(config):
     cache_info = load_json(cache_meta)
     if net_info.get('version') != cache_info.get('version'):
         msg = "New index version detected, syncing local cache..."
-        if USE_RICH:
-            console.print(f"[yellow]{msg}[/yellow]")
-        else:
-            print(msg)
+        print(msg)
         for fname in INDEX_FILES:
             src = network_path / fname
             dst = cache_path / fname
             if src.exists():
                 shutil.copy2(src, dst)
-        msg = "Local cache updated."
-        if USE_RICH:
-            console.print(f"[green]{msg}[/green]")
-        else:
-            print(msg)
+        print("Local cache updated.")
     else:
-        msg = "Using cached index."
-        if USE_RICH:
-            console.print(f"[cyan]{msg}[/cyan]")
-        else:
-            print(msg)
+        print("Using cached index.")
+
 
 def print_metadata(config):
     meta_path = Path(config['storage']['local_cache']) / METADATA_FILE
     meta = load_json(meta_path)
-    if USE_RICH:
-        table = Table(title="Index Metadata")
-        table.add_column("Key")
-        table.add_column("Value")
-        for key in [
-            'version', 'wiki_url', 'total_pages', 'total_chunks',
-            'model_name', 'embedding_dim', 'chunk_size', 'chunk_overlap'
-        ]:
-            table.add_row(key.replace('_', ' ').title(), str(meta.get(key)))
-        console.print(table)
-    else:
-        print("Index Metadata:")
-        for key in [
-            'version', 'wiki_url', 'total_pages', 'total_chunks',
-            'model_name', 'embedding_dim', 'chunk_size', 'chunk_overlap'
-        ]:
-            print(f"  {key.replace('_', ' ').title()}: {meta.get(key)}")
+    print("Index Metadata:")
+    for key in [
+        'version', 'wiki_url', 'total_pages', 'total_chunks',
+        'model_name', 'embedding_dim', 'chunk_size', 'chunk_overlap'
+    ]:
+        print(f"  {key.replace('_', ' ').title()}: {meta.get(key)}")
 
 
 def print_config(retrieval):
@@ -99,6 +70,47 @@ def print_config(retrieval):
     print(f"  top_k: {retrieval.get('top_k', 5)}")
     print(f"  similarity_threshold: {retrieval.get('similarity_threshold', 0.3)}")
     print("Type 'top_k <value>' or 'threshold <value>' to change, or just press Enter to keep.")
+
+def synthesize_answer(results):
+    """
+    Given `results` as a list of (chunk, score) tuples, synthesize a short,
+    human-readable extractive answer and a list of sources. Returns
+    a tuple `(answer_text, sources_list)`.
+    """
+    # Prepare compact context entries
+    entries = []
+    for chunk, score in results:
+        page = chunk.get('page_title') or chunk.get('page', 'Unknown')
+        section = chunk.get('section') or ''
+        text = chunk.get('text', '')
+        url = chunk.get('url', '')
+        # truncate to keep prompts reasonably small
+        snippet = textwrap.shorten(text.replace('\n', ' '), width=800, placeholder='...')
+        entries.append({'page': page, 'section': section, 'text': snippet, 'url': url, 'score': score})
+
+    # Offline extractive summarizer: combine top snippets and produce a
+    # short human-readable answer with concise source citations.
+    if not entries:
+        return ("Entschuldigung, ich konnte keine Informationen finden.", [])
+
+    # Combine the top 2 snippets to increase coverage
+    combined = ' '.join(e['text'] for e in entries[:2])
+    # Simple sentence split (works adequately for short snippets)
+    import re
+    sentences = re.split(r'(?<=[.!?])\s+', combined)
+    answer_sentences = [s.strip() for s in sentences if s.strip()][:2]
+    answer = ' '.join(answer_sentences)
+    if not answer:
+        answer = entries[0]['text'][:400].strip()
+    if answer and not answer.endswith(('.', '!', '?')):
+        answer = answer + '.'
+
+    # Build concise source list (page, url)
+    sources = [(e['page'], e['url']) for e in entries]
+    source_names = ', '.join([s[0] for s in sources[:3]])
+    answer_with_source = f"{answer}\n\nQuelle: {source_names}"
+    return answer_with_source, sources
+
 
 def main():
     try:
@@ -117,12 +129,8 @@ def main():
 | |  | |  __/ (_| |  __/ | (_| | |   <| |   <| |   <| |
 |_|  |_|\___|\__,_|\___|_|\__,_|_|_|\_\_|_|\_\_|_|\_\_|
 """
-    if USE_RICH:
-        console.print(f"[bold magenta]{ascii_art}[/bold magenta]")
-        console.print("[bold green]Welcome to MediaWiki RAG Chat![/bold green]")
-    else:
-        print(ascii_art)
-        print("Welcome to MediaWiki RAG Chat!")
+    print(ascii_art)
+    print("Welcome to MediaWiki RAG Chat!")
 
     # Command summary
     commands = [
@@ -133,14 +141,9 @@ def main():
         "/update - Trigger full index rebuild",
         "/quit   - Exit chat"
     ]
-    if USE_RICH:
-        console.print("[bold cyan]Available commands:[/bold cyan]")
-        for cmd in commands:
-            console.print(f"[cyan]{cmd}[/cyan]")
-    else:
-        print("Available commands:")
-        for cmd in commands:
-            print(cmd)
+    print("Available commands:")
+    for cmd in commands:
+        print(cmd)
 
     # Check for index/cache files before loading
     cache_path = Path(config['storage']['local_cache'])
@@ -150,35 +153,19 @@ def main():
             "No index found. Please run /update to build the index before "
             "searching."
         )
-        if USE_RICH:
-            console.print(f"[yellow]{msg}[/yellow]")
-        else:
-            print(msg)
+        print(msg)
         chunks = None
         embeddings = None
     else:
         # Progress indicator for index loading
-        if USE_RICH:
-            try:
-                with Progress() as progress:
-                    task = progress.add_task("[cyan]Loading index...", total=2)
-                    storage.load_chunks()
-                    progress.advance(task)
-                    storage.load_embeddings()
-                    progress.advance(task)
-            except Exception as e:
-                console.print(f"[red][Error] Failed to load index: {e}[/red]")
-                chunks = None
-                embeddings = None
-        else:
-            try:
-                print("Loading index...")
-                storage.load_chunks()
-                storage.load_embeddings()
-            except Exception as e:
-                print(f"[Error] Failed to load index: {e}")
-                chunks = None
-                embeddings = None
+        try:
+            print("Loading index...")
+            chunks = storage.load_chunks()
+            embeddings = storage.load_embeddings()
+        except Exception as e:
+            print(f"[Error] Failed to load index: {e}")
+            chunks = None
+            embeddings = None
     # ...existing code...
     embedder = Embedder(config['models']['embedding'])
     chunks = storage.chunks if hasattr(storage, 'chunks') else None
@@ -194,10 +181,7 @@ def main():
             cmd = query.strip()
             if cmd in ['/quit', '/exit']:
                 msg = "Goodbye!"
-                if USE_RICH:
-                    console.print(f"[bold green]{msg}[/bold green]")
-                else:
-                    print(msg)
+                print(msg)
                 break
             elif cmd == '/help':
                 print_help()
@@ -207,17 +191,11 @@ def main():
                 continue
             if not cmd:
                 msg = "Please enter a question or command."
-                if USE_RICH:
-                    console.print(f"[yellow]{msg}[/yellow]")
-                else:
-                    print(msg)
+                print(msg)
                 continue
             if cmd == '/update':
                 msg = "Triggering full index rebuild..."
-                if USE_RICH:
-                    console.print(f"[yellow]{msg}[/yellow]")
-                else:
-                    print(msg)
+                print(msg)
                 import subprocess
                 try:
                     result = subprocess.run([
@@ -226,47 +204,33 @@ def main():
                         '--full-rebuild'
                     ], capture_output=True, text=True)
                     if result.returncode == 0:
-                        msg = "Index update completed. Use /refresh to reload."
-                        if USE_RICH:
-                            console.print(f"[green]{msg}[/green]")
-                        else:
-                            print(msg)
+                        msg = "Index update completed. Syncing local cache and reloading recommended."
+                        print(msg)
+                        try:
+                            sync_local_cache(config)
+                        except Exception as e:
+                            print(f"[Warning] Sync after update failed: {e}")
                     else:
                         msg = f"[Error] Update failed: {result.stderr.strip()}"
-                        if USE_RICH:
-                            console.print(f"[red]{msg}[/red]")
-                        else:
-                            print(msg)
+                        print(msg)
                 except Exception as e:
                     msg = f"[Error] Could not run update: {e}"
-                    if USE_RICH:
-                        console.print(f"[red]{msg}[/red]")
-                    else:
-                        print(msg)
+                    print(msg)
                 continue
             if cmd == '/refresh':
-                if USE_RICH:
+                try:
+                    print("Refreshing local cache from network and reloading index...")
                     try:
-                        with Progress() as progress:
-                            task = progress.add_task("[cyan]Reloading index...", total=2)
-                            storage.load_chunks()
-                            progress.advance(task)
-                            storage.load_embeddings()
-                            progress.advance(task)
-                            console.print("[green]Index reloaded from disk.[/green]")
+                        sync_local_cache(config)
                     except Exception as e:
-                        console.print(f"[red][Error] Failed to reload index: {e}[/red]")
-                else:
-                    try:
-                        print("Reloading index...")
-                        storage.load_chunks()
-                        storage.load_embeddings()
-                        print("Index reloaded from disk.")
-                    except Exception as e:
-                        print(f"[Error] Failed to reload index: {e}")
+                        print(f"[Warning] Sync failed: {e}")
+                    chunks = storage.load_chunks()
+                    embeddings = storage.load_embeddings()
+                    print("Index reloaded from disk.")
+                except Exception as e:
+                    print(f"[Error] Failed to reload index: {e}")
                 # Reload chunks and embeddings after refresh
-                chunks = storage.chunks if hasattr(storage, 'chunks') else None
-                embeddings = storage.embeddings if hasattr(storage, 'embeddings') else None
+                # variables already updated above
                 continue
             if cmd == '/config':
                 retrieval = config.get('retrieval', {})
@@ -295,10 +259,7 @@ def main():
             # Query logic: embed, search, display results
             if chunks is None or embeddings is None:
                 msg = "No index loaded. Please run /update and /refresh."
-                if USE_RICH:
-                    console.print(f"[red]{msg}[/red]")
-                else:
-                    print(msg)
+                print(msg)
                 continue
             try:
                 # Embed user query
@@ -317,42 +278,27 @@ def main():
                 ]
                 if not results:
                     msg = "No relevant results found. Try rephrasing your question."
-                    if USE_RICH:
-                        console.print(f"[yellow]{msg}[/yellow]")
-                    else:
-                        print(msg)
+                    print(msg)
                     continue
-                # Display results
-                if USE_RICH:
-                    table = Table(title="Search Results")
-                    table.add_column("Score", justify="right")
-                    table.add_column("Page")
-                    table.add_column("Section")
-                    table.add_column("Text", overflow="fold")
-                    table.add_column("URL")
-                    for chunk, score in results:
-                        table.add_row(
-                            f"{score:.3f}",
-                            str(chunk.get('page_title', '')), 
-                            str(chunk.get('section', '')), 
-                            chunk.get('text', '')[:200] + ("..." if len(chunk.get('text', '')) > 200 else ""),
-                            chunk.get('url', '')
-                        )
-                    console.print(table)
-                else:
-                    print("Results:")
-                    for chunk, score in results:
-                        print(f"Score: {score:.3f}")
-                        print(f"Page: {chunk.get('page_title', '')}")
-                        print(f"Section: {chunk.get('section', '')}")
-                        print(f"Text: {chunk.get('text', '')[:200]}{'...' if len(chunk.get('text', '')) > 200 else ''}")
-                        print(f"URL: {chunk.get('url', '')}")
-                        print("-"*40)
+                # Synthesize a short human-readable answer from the retrieved contexts
+                answer_text, sources = synthesize_answer(results)
+                print("\nAntwort:")
+                print(answer_text)
+                if sources:
+                    print("\nQuellen:")
+                    for p, url in sources[:5]:
+                        if url:
+                            print(f" - {p}: {url}")
+                        else:
+                            print(f" - {p}")
+                # continue to prompt for next query
+                continue
             except Exception as e:
                 msg = f"[Error] Query failed: {e}"
-                if USE_RICH:
-                    console.print(f"[red]{msg}[/red]")
-                else:
-                    print(msg)
+                print(msg)
         except Exception as e:
             print(f"[Error] Unexpected error: {e}")
+
+
+if __name__ == '__main__':
+    main()

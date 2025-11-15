@@ -13,6 +13,8 @@ class Storage:
 
     def __init__(self, base_path):
         self.base_path = Path(base_path)
+        self.chunks = None
+        self.embeddings = None
 
     def save_chunks(self, chunks, path=None):
         path = path or self.base_path / 'chunks.jsonl'
@@ -36,11 +38,17 @@ class Storage:
     def load_chunks(self, path=None):
         path = path or self.base_path / 'chunks.jsonl'
         with open(path, 'r', encoding='utf-8') as f:
-            return [json.loads(line) for line in f]
+            data = [json.loads(line) for line in f]
+        # store in instance for callers that expect attributes
+        self.chunks = data
+        return data
 
     def load_embeddings(self, path=None):
         path = path or self.base_path / 'embeddings.npy'
-        return np.load(path)
+        data = np.load(path)
+        # store in instance for callers that expect attributes
+        self.embeddings = data
+        return data
 
     def acquire_lock(self, lock_path=None, timeout=7200):
         lock_path = lock_path or self.base_path / '.update.lock'
