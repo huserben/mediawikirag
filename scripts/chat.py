@@ -13,6 +13,8 @@ from config import load_config
 from storage import Storage
 from embedder import Embedder
 from cli import print_help
+from llm import get_llm, LLMError
+from prompts import load_prompt
 
 
 logging.basicConfig(
@@ -117,6 +119,8 @@ def main():
         config = load_config()
         sync_local_cache(config)
         storage = Storage(config['storage']['local_cache'])
+        # Instantiate LLM and require it to be available when enabled
+        llm = get_llm(config)
     except Exception as e:
         print(f"[Fatal Error] Startup failed: {e}")
         return
@@ -168,6 +172,7 @@ def main():
             embeddings = None
     # ...existing code...
     embedder = Embedder(config['models']['embedding'])
+    # LLM is required (if enabled) and was initialized at startup
     chunks = storage.chunks if hasattr(storage, 'chunks') else None
     embeddings = storage.embeddings if hasattr(storage, 'embeddings') else None
     retrieval = config.get('retrieval', {})
@@ -280,8 +285,48 @@ def main():
                     msg = "No relevant results found. Try rephrasing your question."
                     print(msg)
                     continue
-                # Synthesize a short human-readable answer from the retrieved contexts
-                answer_text, sources = synthesize_answer(results)
+                # If an LLM is configured, build context and ask it to generate
+                answer_text = None
+                sources = [(r[0].get('page_title') or r[0].get('page', 'Unknown'), r[0].get('url', '')) for r in results]
+                if llm is not None:
+                    try:
+                        # Build a compact context from top results
+                        def build_context(results_list, max_chars=3000):
+                            parts = []
+                            chars = 0
+                            for chunk, score in results_list:
+                                text = chunk.get('text', '')
+                                meta = chunk.get('page_title') or chunk.get('page', '')
+                                part = f"Quelle: {meta}\n{text}\n"
+                                if chars + len(part) > max_chars:
+                                    break
+                                parts.append(part)
+                                chars += len(part)
+                            return "\n---\n".join(parts)
+
+                        context_text = build_context(results)
+                        prompt_path = config.get('models', {}).get('llm', {}).get('prompt_template_path', 'prompts/german_default.txt')
+                        try:
+                            template = load_prompt(prompt_path)
+                        except Exception:
+                            template = None
+
+                        if template:
+                            prompt = template.format(context=context_text, question=cmd)
+                        else:
+                            prompt = f"Kontext:\n{context_text}\n\nFrage: {cmd}\n\nAntwort:" 
+
+                        answer_text = llm.generate(prompt, max_tokens=config.get('models', {}).get('llm', {}).get('max_tokens', 512), temperature=config.get('models', {}).get('llm', {}).get('temperature', 0.0))
+                    except LLMError as e:
+                        print(f"[Warning] LLM generation failed: {e}. Falling back to extractive answer.")
+                        answer_text = None
+                    except Exception as e:
+                        print(f"[Warning] Unexpected LLM error: {e}. Falling back to extractive answer.")
+                        answer_text = None
+
+                # Synthesize a short human-readable answer from the retrieved contexts (fallback)
+                if not answer_text:
+                    answer_text, _ = synthesize_answer(results)
                 print("\nAntwort:")
                 print(answer_text)
                 if sources:
