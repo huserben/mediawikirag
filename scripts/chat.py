@@ -127,11 +127,34 @@ def main():
 
     # ASCII art and greeting
     ascii_art = r"""
- __  __          _      _       _ _    _ _    _ _    _
-|  \/  | ___  __| | ___| | __ _| | | _(_) | _(_) | _(_)
-| |\/| |/ _ \/ _` |/ _ \ |/ _` | | |/ / | |/ / | |/ / |
-| |  | |  __/ (_| |  __/ | (_| | |   <| |   <| |   <| |
-|_|  |_|\___|\__,_|\___|_|\__,_|_|_|\_\_|_|\_\_|_|\_\_|
+ /$$   /$$                                      /$$               /$$                           
+| $$  /$$/                                     | $$              | $$                           
+| $$ /$$/        /$$$$$$$  /$$$$$$ /$$  /$$  /$| $$ /$$$$$$  /$$$$$$$ /$$$$$$  /$$$$$$          
+| $$$$$/        | $$__  $$/$$__  $| $$ | $$ | $| $$/$$__  $$/$$__  $$/$$__  $$/$$__  $$         
+| $$  $$        | $$  \ $| $$  \ $| $$ | $$ | $| $| $$$$$$$| $$  | $| $$  \ $| $$$$$$$$         
+| $$\  $$       | $$  | $| $$  | $| $$ | $$ | $| $| $$_____| $$  | $| $$  | $| $$_____/         
+| $$ \  $$      | $$  | $|  $$$$$$|  $$$$$/$$$$| $|  $$$$$$|  $$$$$$|  $$$$$$|  $$$$$$$         
+|__/  \__/      |__/  |__/\______/ \_____/\___/|__/\_______/\_______/\____  $$\_______/         
+  /$$$$$$                                                            /$$  \ $$                  
+ /$$__  $$                                                          |  $$$$$$/                  
+| $$  \ $$        /$$$$$$$ /$$$$$$$ /$$$$$$  /$$$$$$$/$$$$$$$        \______/                   
+| $$$$$$$$       /$$_____//$$_____//$$__  $$/$$_____/$$_____/                                   
+| $$__  $$      | $$     | $$     | $$$$$$$|  $$$$$|  $$$$$$                                    
+| $$  | $$      | $$     | $$     | $$_____/\____  $\____  $$                                   
+| $$  | $$      |  $$$$$$|  $$$$$$|  $$$$$$$/$$$$$$$/$$$$$$$/                                   
+|__/  |__/       \_______/\_______/\_______|_______|_______/                                    
+ /$$$$$$                  /$$             /$$/$$/$$                                             
+|_  $$_/                 | $$            | $| $|__/                                             
+  | $$         /$$$$$$$ /$$$$$$   /$$$$$$| $| $$/$$ /$$$$$$  /$$$$$$ /$$$$$$$  /$$$$$$$ /$$$$$$ 
+  | $$        | $$__  $|_  $$_/  /$$__  $| $| $| $$/$$__  $$/$$__  $| $$__  $$/$$_____//$$__  $$
+  | $$        | $$  \ $$ | $$   | $$$$$$$| $| $| $| $$  \ $| $$$$$$$| $$  \ $| $$     | $$$$$$$$
+  | $$        | $$  | $$ | $$ /$| $$_____| $| $| $| $$  | $| $$_____| $$  | $| $$     | $$_____/
+ /$$$$$$      | $$  | $$ |  $$$$|  $$$$$$| $| $| $|  $$$$$$|  $$$$$$| $$  | $|  $$$$$$|  $$$$$$$
+|______/      |__/  |__/  \___/  \_______|__|__|__/\____  $$\_______|__/  |__/\_______/\_______/
+                                                   /$$  \ $$                                    
+                                                  |  $$$$$$/                                    
+                                                   \______/                                     
+                                                                                                                               
 """
     print(ascii_art)
     print("Welcome to MediaWiki RAG Chat!")
@@ -178,6 +201,8 @@ def main():
     retrieval = config.get('retrieval', {})
     top_k = retrieval.get('top_k', 5)
     similarity_threshold = retrieval.get('similarity_threshold', 0.3)
+
+    print("Stelle eine Frage oder führe ein Kommando aus:")
 
     while True:
         try:
@@ -290,8 +315,8 @@ def main():
                 sources = [(r[0].get('page_title') or r[0].get('page', 'Unknown'), r[0].get('url', '')) for r in results]
                 if llm is not None:
                     try:
-                        # Build a compact context from top results
-                        def build_context(results_list, max_chars=3000):
+                        # Build a compact context from top results as a list of parts
+                        def build_context_parts(results_list, max_chars=3000):
                             parts = []
                             chars = 0
                             for chunk, score in results_list:
@@ -302,21 +327,25 @@ def main():
                                     break
                                 parts.append(part)
                                 chars += len(part)
-                            return "\n---\n".join(parts)
+                            return parts
 
-                        context_text = build_context(results)
+                        context_parts = build_context_parts(results)
                         prompt_path = config.get('models', {}).get('llm', {}).get('prompt_template_path', 'prompts/german_default.txt')
                         try:
                             template = load_prompt(prompt_path)
                         except Exception:
                             template = None
 
-                        if template:
-                            prompt = template.format(context=context_text, question=cmd)
-                        else:
-                            prompt = f"Kontext:\n{context_text}\n\nFrage: {cmd}\n\nAntwort:" 
+                        if not template:
+                            template = "{context}\n\nFrage: {question}\n\nAntwort:"
 
-                        answer_text = llm.generate(prompt, max_tokens=config.get('models', {}).get('llm', {}).get('max_tokens', 512), temperature=config.get('models', {}).get('llm', {}).get('temperature', 0.0))
+                        answer_text = llm.generate_from_chunks(
+                            chunks=context_parts,
+                            prompt_template=template,
+                            question=cmd,
+                            max_tokens=config.get('models', {}).get('llm', {}).get('max_tokens', 512),
+                            temperature=config.get('models', {}).get('llm', {}).get('temperature', 0.0),
+                        )
                     except LLMError as e:
                         print(f"[Warning] LLM generation failed: {e}. Falling back to extractive answer.")
                         answer_text = None

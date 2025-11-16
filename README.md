@@ -1,3 +1,5 @@
+2. Check the /api/tags endpoint:
+curl -s "http://127.0.0.1:11434/api/tags" | ConvertFrom-Json
 
 # mediawikirag
 
@@ -99,6 +101,21 @@ storage:
 models:
 	embedding: "paraphrase-multilingual-MiniLM-L12-v2"
 	embedding_dim: 384
+	llm:
+		enabled: true
+		provider: 'ollama'  # use 'gpt4all' or 'ollama'
+		model: 'your-ollama-model'
+		base_url: 'http://127.0.0.1:11434'
+		# request_format controls how the prompt is sent to Ollama.
+		# - 'prompt': send a single prompt string in 'prompt'
+		# - 'messages': send a chat-style messages list
+		# - 'auto': try 'prompt' first and fall back to 'messages' if empty
+		request_format: 'auto'
+	llm:
+		enabled: true
+		provider: 'ollama'  # use 'gpt4all' or 'ollama'
+		model: 'your-ollama-model'
+		base_url: 'http://127.0.0.1:11434'
 retrieval:
 	top_k: 5
 	similarity_threshold: 0.3

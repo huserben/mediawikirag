@@ -11,8 +11,12 @@ models:
   embedding_dim: 384
   llm:
     enabled: true
-    provider: 'gpt4all'
-    model: 'mistral-7b-instruct-v0.1.Q4_0.gguf'
+    provider: 'ollama'
+    model: 'gemma2:2b'
+    base_url: 'http://127.0.0.1:11434'
+    # Request format: 'prompt' (single prompt string), 'messages' (chat messages list),
+    # or 'auto' (try 'prompt' first, then 'messages' on failure).
+    request_format: 'auto'
     max_tokens: 512
     temperature: 0.7
     auto_download': True
