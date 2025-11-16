@@ -15,6 +15,7 @@ from embedder import Embedder
 from cli import print_help
 from llm import get_llm, LLMError
 from prompts import load_prompt
+from retriever import search_chunks
 
 
 logging.basicConfig(
@@ -125,6 +126,8 @@ def main():
         print(f"[Fatal Error] Startup failed: {e}")
         return
 
+    # Note: backend detection happens after loading the index below.
+
     # ASCII art and greeting
     ascii_art = r"""
  /$$   /$$                                      /$$               /$$                           
@@ -193,6 +196,17 @@ def main():
             print(f"[Error] Failed to load index: {e}")
             chunks = None
             embeddings = None
+    # Determine which vector backend is active now that the index (and any
+    # optional vector stores) have been loaded/initialized.
+    try:
+        backend = 'brute-force (numpy)'
+        if getattr(storage, '_chroma', None) is not None:
+            backend = 'chroma'
+        elif getattr(storage, '_vectorstore', None) is not None:
+            backend = 'faiss'
+    except Exception:
+        backend = 'brute-force (numpy)'
+    print(f"Vector backend: {backend}")
     # ...existing code...
     embedder = Embedder(config['models']['embedding'])
     # LLM is required (if enabled) and was initialized at startup
@@ -201,6 +215,9 @@ def main():
     retrieval = config.get('retrieval', {})
     top_k = retrieval.get('top_k', 5)
     similarity_threshold = retrieval.get('similarity_threshold', 0.3)
+    use_mmr = retrieval.get('use_mmr', False)
+    mmr_fetch_k = retrieval.get('mmr_fetch_k', 20)
+    mmr_lambda = retrieval.get('mmr_lambda', 0.5)
 
     print("Stelle eine Frage oder führe ein Kommando aus:")
 
@@ -292,20 +309,20 @@ def main():
                 print(msg)
                 continue
             try:
-                # Embed user query
+                # Embed user query and run retrieval using helper
                 query_vec = embedder.embed([cmd])[0]
-                import numpy as np
-                emb_matrix = np.array(embeddings)
-                # Compute cosine similarity
-                norm_emb = emb_matrix / np.linalg.norm(emb_matrix, axis=1, keepdims=True)
-                norm_query = query_vec / np.linalg.norm(query_vec)
-                scores = np.dot(norm_emb, norm_query)
-                # Get top-k results above threshold
-                top_indices = np.argsort(scores)[::-1][:top_k]
-                results = [
-                    (chunks[i], float(scores[i]))
-                    for i in top_indices if scores[i] >= similarity_threshold
-                ]
+                # Prefer storage-backed search (may use FAISS) when available
+                if hasattr(storage, 'search'):
+                    results = storage.search(
+                        query_vec,
+                        top_k=top_k,
+                        threshold=similarity_threshold,
+                        use_mmr=use_mmr,
+                        fetch_k=mmr_fetch_k,
+                        lambda_param=mmr_lambda,
+                    )
+                else:
+                    results = search_chunks(query_vec, embeddings, chunks, top_k=top_k, threshold=similarity_threshold)
                 if not results:
                     msg = "No relevant results found. Try rephrasing your question."
                     print(msg)
@@ -359,12 +376,13 @@ def main():
                 print("\nAntwort:")
                 print(answer_text)
                 if sources:
-                    print("\nQuellen:")
-                    for p, url in sources[:5]:
-                        if url:
-                            print(f" - {p}: {url}")
-                        else:
-                            print(f" - {p}")
+                    # Print up to 5 sources that have URLs
+                    urls_present = [url for _, url in sources[:5] if url]
+                    if urls_present:
+                        print("\nQuellen:")
+                        for p, url in sources[:5]:
+                            if url:
+                                print(f" - {p}: {url}")
                 # continue to prompt for next query
                 continue
             except Exception as e:

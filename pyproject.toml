@@ -17,7 +17,10 @@ dependencies = [
     "tqdm>=4.66.0",
     "pyyaml>=6.0",
     "rich>=13.0.0",
-    "gpt4all>=1.0.0"
+    "gpt4all>=1.0.0",
+    # faiss-cpu has limited Windows wheel support; mark it platform-specific
+    "faiss-cpu>=1.7.4; sys_platform != 'win32'",
+    "chromadb>=0.3.26"
 ]
 
 [tool.hatch.envs.dev]

@@ -3,8 +3,8 @@ wiki:
   api_endpoint: "/api.php"
 
 storage:
-  network_drive: "D:/repos/mediawikirag/network_drive"
-  local_cache: "D:/repos/mediawikirag/cache"
+  network_drive: "/mnt/d/repos/mediawikirag/network_drive"
+  local_cache: "/mnt/d/repos/mediawikirag/cache"
 
 models:
   embedding: "paraphrase-multilingual-MiniLM-L12-v2"
@@ -13,13 +13,13 @@ models:
     enabled: true
     provider: 'ollama'
     model: 'gemma2:2b'
-    base_url: 'http://127.0.0.1:11434'
+    base_url: 'http://10.255.255.254:11434'
     # Request format: 'prompt' (single prompt string), 'messages' (chat messages list),
     # or 'auto' (try 'prompt' first, then 'messages' on failure).
     request_format: 'auto'
     max_tokens: 512
     temperature: 0.7
-    auto_download': True
+    auto_download: true
     # Prompt template file to use for generation
     prompt_template_path: "prompts/german_default.txt"
     n_ctx: 2048

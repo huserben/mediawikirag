@@ -116,6 +116,37 @@ def main():
         try:
             storage.save_chunks(all_chunks, staging_path / 'chunks.jsonl')
             storage.save_embeddings(embeddings, staging_path / 'embeddings.npy')
+            # Attempt to build and persist a FAISS index in staging so
+            # that consumers can load a ready-made index instead of
+            # rebuilding from embeddings. This is optional and will
+            # continue silently if FAISS isn't installed.
+            try:
+                from vectorstore import FaissVectorStore
+
+                try:
+                    vs = FaissVectorStore(staging_path)
+                    vs.build_index(embeddings)
+                    vs.save()
+                    logging.info('FAISS index built and saved to staging.')
+                except Exception as fi_err:
+                    logging.info(f'FAISS build/save skipped: {fi_err}')
+            except Exception as imp_err:
+                logging.info(f'FAISS not available: {imp_err}')
+            # Try to persist a Chroma collection for production retrieval
+            try:
+                try:
+                    from vectorstore_chroma import ChromaVectorStore
+                    try:
+                        cvs = ChromaVectorStore(staging_path)
+                        cvs.build_index(embeddings, all_chunks)
+                        logging.info('Chroma collection built and persisted to staging.')
+                    except Exception as c_err:
+                        logging.info(f'Chroma build/save skipped: {c_err}')
+                except Exception as impc:
+                    logging.info(f'Chroma not available: {impc}')
+            except Exception:
+                pass
+
             with open(staging_path / 'wiki_state.json', 'w', encoding='utf-8') as f:
                 json.dump(new_state, f, ensure_ascii=False, indent=2)
             # Write metadata.json for versioning and stats

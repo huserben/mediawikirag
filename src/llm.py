@@ -40,6 +40,24 @@ class GPT4AllAdapter(LLM):
         if self._model is not None:
             return
         try:
+            # If configured to auto-download, attempt to ensure model file
+            # exists using our download helper (checksum verified).
+            if self.auto_download and self.model_url:
+                try:
+                    from .download import ensure_model
+                    # ensure_model will return the final path or raise
+                    model_path = ensure_model(
+                        dest_path=self.model_path,
+                        url=self.model_url,
+                        sha256=self.model_sha256,
+                    )
+                    # make sure we use the resolved path
+                    self.model_path = model_path
+                except Exception:
+                    # ignore download errors here and let GPT4All client
+                    # attempt its own handling; surface a clear error later
+                    pass
+
             # Lazily import GPT4All to avoid import-time dependency
             # errors in test environments.
             from gpt4all import GPT4All
@@ -290,7 +308,7 @@ class OllamaAdapter(LLM):
         )
 
 
-def get_llm(cfg: dict) -> Optional[LLM]:
+def get_llm(cfg: dict, validate: bool = True) -> Optional[LLM]:
     """Factory: returns an LLM instance or None if disabled/not configured."""
     if not cfg:
         return None
@@ -324,10 +342,11 @@ def get_llm(cfg: dict) -> Optional[LLM]:
             model_sha256=llm_cfg.get("model_sha256"),
         )
 
-        # Force loading at factory time so callers know immediately
-        # whether the model is available. This makes the model
-        # effectively required (not optional) when enabled.
-        adapter._load()
+        # Optionally force loading at factory time so callers know
+        # immediately whether the model is available. Set `validate`
+        # to False to defer loading (useful in tests or lightweight runs).
+        if validate:
+            adapter._load()
         return adapter
     elif provider == "ollama":
         model_identifier = llm_cfg.get("model") or llm_cfg.get("model_name")
@@ -341,8 +360,9 @@ def get_llm(cfg: dict) -> Optional[LLM]:
             temperature=llm_cfg.get("temperature", 0.0),
         )
 
-        # Verify that Ollama is reachable at factory time
-        adapter._load()
+        # Verify that Ollama is reachable at factory time if requested
+        if validate:
+            adapter._load()
         return adapter
     else:
         # Unknown provider: future extension point
